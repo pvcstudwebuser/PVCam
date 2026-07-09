@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pvcam-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8787

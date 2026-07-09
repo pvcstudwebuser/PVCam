@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PVCam by PVC Studio — Live Camera Motion to FBX</title>
+<style>
+  :root{
+    --ink:#0B0D0C;
+    --paper:#EAF2ED;
+    --lock:#4FE3A3;
+    --steel:#8A9691;
+    --warn:#FF6B4A;
+    --panel:#121613;
+    --line:#232B26;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:var(--sans);
+    height:100%;
+    overflow-x:hidden;
+  }
+  ::selection{ background:var(--lock); color:var(--ink); }
+
+  a{color:inherit}
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 28px;
+    border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:50;
+    background:rgba(11,13,12,0.9);
+    backdrop-filter:blur(8px);
+  }
+  .brand{
+    font-family:var(--mono);
+    font-size:14px;
+    letter-spacing:0.14em;
+    display:flex; align-items:center; gap:10px;
+  }
+  .brand .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--steel);
+    transition:background .2s, box-shadow .2s;
+  }
+  .brand .dot.live{
+    background:var(--lock);
+    box-shadow:0 0 8px var(--lock);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.45} }
+  .brand small{ color:var(--steel); font-weight:400; letter-spacing:0.08em; }
+
+  .status-cluster{
+    display:flex; gap:26px; font-family:var(--mono); font-size:12px; color:var(--steel);
+  }
+  .status-cluster b{ color:var(--paper); font-weight:600; }
+
+  /* ---------- Layout ---------- */
+  .stage{
+    display:grid;
+    grid-template-columns: 1fr 340px;
+    gap:1px;
+    background:var(--line);
+    min-height:calc(100vh - 61px);
+  }
+  @media (max-width: 880px){
+    .stage{ grid-template-columns: 1fr; }
+  }
+
+  .viewport-wrap{
+    background:var(--ink);
+    position:relative;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:28px;
+  }
+  .viewport{
+    position:relative;
+    width:100%;
+    max-width:920px;
+    aspect-ratio: 16/9;
+    background:#000;
+    border-radius:2px;
+    overflow:hidden;
+    border:1px solid var(--line);
+  }
+  .viewport video{
+    width:100%; height:100%; object-fit:cover;
+    transform:scaleX(-1);
+    display:block;
+  }
+  .viewport canvas{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    pointer-events:none;
+    transform:scaleX(-1);
+  }
+  .hud-frame{
+    position:absolute; inset:0;
+    pointer-events:none;
+  }
+  .corner{
+    position:absolute; width:22px; height:22px;
+    border-color:var(--steel);
+    opacity:.55;
+    transition:border-color .2s, opacity .2s;
+  }
+  .viewport.tracking .corner{ border-color:var(--lock); opacity:.9; }
+  .corner.tl{ top:10px; left:10px; border-top:1.5px solid; border-left:1.5px solid; }
+  .corner.tr{ top:10px; right:10px; border-top:1.5px solid; border-right:1.5px solid; }
+  .corner.bl{ bottom:10px; left:10px; border-bottom:1.5px solid; border-left:1.5px solid; }
+  .corner.br{ bottom:10px; right:10px; border-bottom:1.5px solid; border-right:1.5px solid; }
+
+  .rec-badge{
+    position:absolute; top:14px; left:14px;
+    font-family:var(--mono); font-size:11px; letter-spacing:.1em;
+    color:var(--warn);
+    display:flex; align-items:center; gap:6px;
+    opacity:0;
+    transition:opacity .2s;
+  }
+  .rec-badge.on{ opacity:1; }
+  .rec-badge .rdot{
+    width:7px;height:7px;border-radius:50%; background:var(--warn);
+    animation:pulse 1s infinite;
+  }
+  .timecode{
+    position:absolute; top:14px; right:14px;
+    font-family:var(--mono); font-size:11px; color:var(--steel);
+    letter-spacing:.05em;
+  }
+  .empty-state{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; text-align:center; padding:20px;
+  }
+  .empty-state .glyph{
+    width:52px;height:52px;
+    border:1px solid var(--line);
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--steel);
+  }
+  .empty-state h2{
+    font-family:var(--mono); font-size:14px; font-weight:500;
+    letter-spacing:.04em; color:var(--paper);
+  }
+  .empty-state p{
+    font-size:13px; color:var(--steel); max-width:320px; line-height:1.5;
+  }
+
+  /* ---------- Side panel ---------- */
+  .panel{
+    background:var(--panel);
+    padding:24px 22px;
+    display:flex; flex-direction:column; gap:22px;
+    overflow-y:auto;
+  }
+  .panel h3{
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    color:var(--steel); text-transform:uppercase; margin-bottom:12px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .panel h3::after{
+    content:''; flex:1; height:1px; background:var(--line);
+  }
+
+  .btn{
+    width:100%;
+    padding:13px 16px;
+    border-radius:2px;
+    border:1px solid var(--line);
+    background:transparent;
+    color:var(--paper);
+    font-family:var(--sans);
+    font-size:13.5px;
+    font-weight:500;
+    cursor:pointer;
+    transition:all .15s;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .btn:hover{ border-color:var(--steel); }
+  .btn:disabled{ opacity:.35; cursor:not-allowed; }
+  .btn-primary{
+    background:var(--lock); color:var(--ink); border-color:var(--lock);
+    font-weight:600;
+  }
+  .btn-primary:hover{ background:#3fd394; border-color:#3fd394; }
+  .btn-danger{
+    border-color:var(--warn); color:var(--warn);
+  }
+  .btn-danger:hover{ background:rgba(255,107,74,.08); }
+  .btn-row{ display:flex; gap:8px; }
+  .btn-row .btn{ flex:1; }
+
+  .field{
+    display:flex; flex-direction:column; gap:6px; margin-bottom:14px;
+  }
+  .field label{
+    font-size:12px; color:var(--steel); display:flex; justify-content:space-between;
+    font-family:var(--mono);
+  }
+  .field label span.val{ color:var(--paper); }
+  input[type=range]{
+    -webkit-appearance:none; width:100%; height:2px; background:var(--line); border-radius:2px; outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+    background:var(--lock); cursor:pointer; border:2px solid var(--panel);
+  }
+  select, input[type=text]{
+    width:100%; background:var(--ink); border:1px solid var(--line); color:var(--paper);
+    padding:9px 10px; border-radius:2px; font-family:var(--sans); font-size:13px;
+  }
+
+  .metric-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:10px;
+  }
+  .metric{
+    border:1px solid var(--line); padding:10px 12px; border-radius:2px;
+  }
+  .metric .k{ font-family:var(--mono); font-size:10px; color:var(--steel); letter-spacing:.08em; text-transform:uppercase; }
+  .metric .v{ font-family:var(--mono); font-size:17px; margin-top:4px; color:var(--paper); }
+  .metric .v.lock{ color:var(--lock); }
+
+  .log{
+    font-family:var(--mono); font-size:11px; color:var(--steel);
+    background:var(--ink); border:1px solid var(--line); border-radius:2px;
+    padding:10px 12px; max-height:120px; overflow-y:auto; line-height:1.6;
+  }
+  .log div{ white-space:pre-wrap; }
+  .log .warn{ color:var(--warn); }
+  .log .ok{ color:var(--lock); }
+
+  .keyframe-strip{
+    height:38px; background:var(--ink); border:1px solid var(--line); border-radius:2px;
+    position:relative; overflow:hidden;
+  }
+  .keyframe-strip .kf{
+    position:absolute; top:0; bottom:0; width:1px; background:var(--lock); opacity:.7;
+  }
+  .keyframe-strip .kf-count{
+    position:absolute; bottom:3px; right:6px; font-family:var(--mono); font-size:10px; color:var(--steel);
+  }
+
+  footer.foot{
+    padding:18px 28px; border-top:1px solid var(--line);
+    font-family:var(--mono); font-size:11px; color:var(--steel);
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  }
+
+  .badge-pill{
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:var(--mono); font-size:10.5px; color:var(--steel);
+    border:1px solid var(--line); padding:3px 8px; border-radius:20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="dot" id="liveDot"></span>
+    PVCAM <small>by PVC Studio / camera motion → FBX</small>
+  </div>
+  <div class="status-cluster">
+    <div>FEATURES <b id="featCount">0</b></div>
+    <div>FPS <b id="fpsCount">0</b></div>
+    <div>KEYFRAMES <b id="kfCount">0</b></div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="viewport-wrap">
+    <div class="viewport" id="viewport">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="hud-frame">
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
+      </div>
+      <div class="rec-badge" id="recBadge"><span class="rdot"></span>REC</div>
+      <div class="timecode" id="timecode">00:00.00</div>
+      <div class="empty-state" id="emptyState">
+        <div class="glyph">◎</div>
+        <h2>NO SIGNAL</h2>
+        <p>Grant camera access to begin tracking. PVCam derives a stabilized 3D camera path from visual feature motion in your live feed.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div>
+      <h3>Capture</h3>
+      <div class="btn-row" style="margin-bottom:10px;">
+        <button class="btn btn-primary" id="startCam">Enable Camera</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="startRec" disabled>● Start Tracking</button>
+        <button class="btn btn-danger" id="stopRec" disabled>■ Stop</button>
+      </div>
+    </div>
+
+    <div>
+      <h3>Stabilization</h3>
+      <div class="field">
+        <label>Smoothing (One Euro β) <span class="val" id="betaVal">0.02</span></label>
+        <input type="range" id="beta" min="0" max="100" value="20">
+      </div>
+      <div class="field">
+        <label>Min cutoff <span class="val" id="mincutVal">1.0</span></label>
+        <input type="range" id="mincut" min="1" max="100" value="10">
+      </div>
+      <div class="field">
+        <label>Keyframe threshold <span class="val" id="threshVal">0.004</span></label>
+        <input type="range" id="thresh" min="1" max="100" value="15">
+      </div>
+    </div>
+
+    <div>
+      <h3>Path Metrics</h3>
+      <div class="metric-grid">
+        <div class="metric"><div class="k">Duration</div><div class="v" id="mDuration">0.0s</div></div>
+        <div class="metric"><div class="k">Raw Samples</div><div class="v" id="mRaw">0</div></div>
+        <div class="metric"><div class="k">Track Quality</div><div class="v lock" id="mQuality">—</div></div>
+        <div class="metric"><div class="k">Jitter (px)</div><div class="v" id="mJitter">0.00</div></div>
+      </div>
+    </div>
+
+    <div>
+      <h3>Timeline</h3>
+      <div class="keyframe-strip" id="kfStrip">
+        <div class="kf-count" id="kfStripCount">0 keyframes</div>
+      </div>
+    </div>
+
+    <div>
+      <h3>Export</h3>
+      <div class="field">
+        <label>Backend endpoint (Blender/bpy service)</label>
+        <input type="text" id="endpoint" placeholder="https://your-server.com/convert-to-fbx" value="">
+      </div>
+      <div class="btn-row" style="margin-bottom:8px;">
+        <button class="btn" id="downloadJson" disabled>Download JSON</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="sendFbx" disabled>Send → Get FBX</button>
+      </div>
+    </div>
+
+    <div>
+      <h3>Log</h3>
+      <div class="log" id="logBox"><div>Awaiting camera permission…</div></div>
+    </div>
+  </div>
+</div>
+
+<footer class="foot">
+  <span>Optical-flow tracking · One Euro Filter stabilization · Client-side, nothing leaves your browser until export</span>
+  <span class="badge-pill">v0.1 · local session</span>
+</footer>
+
+<script src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()" type="text/javascript"></script>
+<script>
+/* ============================================================
+   PVCam by PVC Studio
+   Live webcam -> optical flow feature tracking -> estimate
+   camera rotation/translation deltas frame-to-frame -> One Euro
+   filter stabilization -> keyframe reduction -> JSON timeline
+   -> POST to a backend that runs Blender headless (bpy) to
+   produce a real FBX camera animation.
+   ============================================================ */
+
+let cvReady = false;
+function onOpenCvReady(){
+  cvReady = true;
+  log('OpenCV.js loaded — vision engine ready.', 'ok');
+}
+
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const octx = overlay.getContext('2d');
+const viewport = document.getElementById('viewport');
+const emptyState = document.getElementById('emptyState');
+const liveDot = document.getElementById('liveDot');
+const recBadge = document.getElementById('recBadge');
+const timecodeEl = document.getElementById('timecode');
+const logBox = document.getElementById('logBox');
+
+const startCamBtn = document.getElementById('startCam');
+const startRecBtn = document.getElementById('startRec');
+const stopRecBtn = document.getElementById('stopRec');
+const downloadJsonBtn = document.getElementById('downloadJson');
+const sendFbxBtn = document.getElementById('sendFbx');
+const endpointInput = document.getElementById('endpoint');
+// Remember the backend URL across visits — this is a real deployed
+// site (not a sandboxed artifact), so localStorage is safe to use here.
+try{
+  const savedEndpoint = localStorage.getItem('camtrack_endpoint');
+  if(savedEndpoint) endpointInput.value = savedEndpoint;
+  endpointInput.addEventListener('change', ()=>{
+    localStorage.setItem('camtrack_endpoint', endpointInput.value.trim());
+  });
+}catch(e){ /* storage unavailable, fall back silently */ }
+
+const featCountEl = document.getElementById('featCount');
+const fpsCountEl = document.getElementById('fpsCount');
+const kfCountEl = document.getElementById('kfCount');
+const mDuration = document.getElementById('mDuration');
+const mRaw = document.getElementById('mRaw');
+const mQuality = document.getElementById('mQuality');
+const mJitter = document.getElementById('mJitter');
+const kfStrip = document.getElementById('kfStrip');
+const kfStripCount = document.getElementById('kfStripCount');
+
+const betaSlider = document.getElementById('beta');
+const mincutSlider = document.getElementById('mincut');
+const threshSlider = document.getElementById('thresh');
+const betaVal = document.getElementById('betaVal');
+const mincutVal = document.getElementById('mincutVal');
+const threshVal = document.getElementById('threshVal');
+
+function log(msg, cls){
+  const d = document.createElement('div');
+  if(cls) d.className = cls;
+  const t = new Date().toLocaleTimeString();
+  d.textContent = `[${t}] ${msg}`;
+  logBox.appendChild(d);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+/* ---------------- One Euro Filter ---------------- */
+class OneEuroFilter{
+  constructor(freq, mincutoff=1.0, beta=0.0, dcutoff=1.0){
+    this.freq=freq; this.mincutoff=mincutoff; this.beta=beta; this.dcutoff=dcutoff;
+    this.xPrev=null; this.dxPrev=0; this.tPrev=null;
+  }
+  alpha(cutoff, dt){
+    const tau = 1.0/(2*Math.PI*cutoff);
+    return 1.0/(1.0 + tau/dt);
+  }
+  filter(x, t){
+    if(this.tPrev===null){ this.tPrev=t; this.xPrev=x; this.dxPrev=0; return x; }
+    const dt = Math.max((t-this.tPrev)/1000, 1/120);
+    this.tPrev = t;
+    const dx = (x - this.xPrev)/dt;
+    const aD = this.alpha(this.dcutoff, dt);
+    const dxHat = aD*dx + (1-aD)*this.dxPrev;
+    const cutoff = this.mincutoff + this.beta*Math.abs(dxHat);
+    const a = this.alpha(cutoff, dt);
+    const xHat = a*x + (1-a)*this.xPrev;
+    this.xPrev = xHat; this.dxPrev = dxHat;
+    return xHat;
+  }
+}
+
+/* ---------------- State ---------------- */
+let stream=null, streaming=false, tracking=false;
+let prevGray=null, currGray=null;
+let trackPoints=null; // cv.Mat of points
+let frameW=0, frameH=0;
+let rafId=null;
+let lastFrameTime=performance.now();
+let fpsSamples=[];
+
+let camPos = {x:0,y:0,z:0}; // accumulated virtual camera translation (arbitrary units)
+let camRot = {x:0,y:0,z:0}; // accumulated virtual camera rotation (degrees, euler)
+let filters = null;
+let rawSamples = []; // {t, pos:{x,y,z}, rot:{x,y,z}}
+let keyframes = [];
+let recStartTime = 0;
+let jitterAccum = [];
+
+function makeFilters(){
+  const freq = 30;
+  const mincut = parseFloat(mincutVal.textContent);
+  const beta = parseFloat(betaVal.textContent);
+  return {
+    px: new OneEuroFilter(freq, mincut, beta),
+    py: new OneEuroFilter(freq, mincut, beta),
+    pz: new OneEuroFilter(freq, mincut, beta),
+    rx: new OneEuroFilter(freq, mincut, beta),
+    ry: new OneEuroFilter(freq, mincut, beta),
+    rz: new OneEuroFilter(freq, mincut, beta),
+  };
+}
+
+/* ---------------- Slider wiring ---------------- */
+function syncSliders(){
+  betaVal.textContent = (betaSlider.value/1000).toFixed(3);
+  mincutVal.textContent = (mincutSlider.value/10).toFixed(1);
+  threshVal.textContent = (threshSlider.value/2500).toFixed(4);
+}
+[betaSlider, mincutSlider, threshSlider].forEach(s=>{
+  s.addEventListener('input', syncSliders);
+});
+syncSliders();
+
+/* ---------------- Camera start ---------------- */
+startCamBtn.addEventListener('click', async ()=>{
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ width:1280, height:720, facingMode:'user' }, audio:false });
+    video.srcObject = stream;
+    await video.play();
+    frameW = video.videoWidth; frameH = video.videoHeight;
+    overlay.width = frameW; overlay.height = frameH;
+    streaming = true;
+    emptyState.style.display = 'none';
+    liveDot.classList.add('live');
+    startCamBtn.disabled = true;
+    startCamBtn.textContent = 'Camera Active';
+    startRecBtn.disabled = false;
+    log('Camera stream acquired ' + frameW + '×' + frameH + '.', 'ok');
+    drawLoop();
+  }catch(e){
+    log('Camera access failed: ' + e.message, 'warn');
+  }
+});
+
+/* ---------------- Tracking start/stop ---------------- */
+startRecBtn.addEventListener('click', ()=>{
+  if(!cvReady){ log('Vision engine still loading, try again in a moment.', 'warn'); return; }
+  tracking = true;
+  viewport.classList.add('tracking');
+  recBadge.classList.add('on');
+  startRecBtn.disabled = true;
+  stopRecBtn.disabled = false;
+  downloadJsonBtn.disabled = true;
+  sendFbxBtn.disabled = true;
+
+  camPos = {x:0,y:0,z:0};
+  camRot = {x:0,y:0,z:0};
+  filters = makeFilters();
+  rawSamples = [];
+  keyframes = [];
+  jitterAccum = [];
+  prevGray = null; trackPoints = null;
+  recStartTime = performance.now();
+  log('Tracking started. Move the camera smoothly for best results.', 'ok');
+});
+
+stopRecBtn.addEventListener('click', ()=>{
+  tracking = false;
+  viewport.classList.remove('tracking');
+  recBadge.classList.remove('on');
+  startRecBtn.disabled = false;
+  stopRecBtn.disabled = true;
+  const hasData = rawSamples.length > 2;
+  downloadJsonBtn.disabled = !hasData;
+  sendFbxBtn.disabled = !hasData;
+  log(`Tracking stopped. ${rawSamples.length} raw samples, ${keyframes.length} keyframes reduced.`, 'ok');
+  finalizeMetrics();
+});
+
+/* ---------------- Main loop ---------------- */
+function drawLoop(){
+  rafId = requestAnimationFrame(drawLoop);
+  if(!streaming) return;
+
+  const now = performance.now();
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+  if(dt>0){
+    fpsSamples.push(1000/dt);
+    if(fpsSamples.length>30) fpsSamples.shift();
+    const avgFps = fpsSamples.reduce((a,b)=>a+b,0)/fpsSamples.length;
+    fpsCountEl.textContent = avgFps.toFixed(0);
+  }
+
+  octx.clearRect(0,0,overlay.width, overlay.height);
+
+  if(cvReady){
+    processFrame(now);
+  }
+
+  if(tracking){
+    const elapsed = (now - recStartTime)/1000;
+    const mm = Math.floor(elapsed/60).toString().padStart(2,'0');
+    const ss = (elapsed%60).toFixed(2).padStart(5,'0');
+    timecodeEl.textContent = `${mm}:${ss}`;
+  }
+}
+
+/* ---------------- Optical flow via OpenCV.js ---------------- */
+function processFrame(now){
+  let src;
+  try{
+    src = new cv.Mat(frameH, frameW, cv.CV_8UC4);
+    const cap = getCapCanvas();
+    src.data.set(cap);
+  }catch(e){ return; }
+
+  let gray = new cv.Mat();
+  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+  if(prevGray===null){
+    prevGray = gray.clone();
+    trackPoints = detectFeatures(gray);
+    drawFeatures(trackPoints, null);
+    src.delete(); gray.delete();
+    return;
+  }
+
+  if(trackPoints===null || trackPoints.rows < 12){
+    trackPoints = detectFeatures(prevGray);
+  }
+
+  if(trackPoints && trackPoints.rows>0){
+    let nextPts = new cv.Mat();
+    let status = new cv.Mat();
+    let err = new cv.Mat();
+    let winSize = new cv.Size(21,21);
+    try{
+      cv.calcOpticalFlowPyrLK(prevGray, gray, trackPoints, nextPts, status, err, winSize, 3);
+    }catch(e){
+      nextPts.delete(); status.delete(); err.delete();
+      prevGray.delete(); prevGray = gray;
+      trackPoints = null;
+      src.delete();
+      return;
+    }
+
+    // Collect good points, compute mean flow + rotation estimate
+    let good0=[], good1=[];
+    for(let i=0;i<status.rows;i++){
+      if(status.data[i]===1){
+        good0.push({x:trackPoints.data32F[i*2], y:trackPoints.data32F[i*2+1]});
+        good1.push({x:nextPts.data32F[i*2], y:nextPts.data32F[i*2+1]});
+      }
+    }
+
+    featCountEl.textContent = good1.length;
+
+    if(good0.length >= 8){
+      const motion = estimateCameraDelta(good0, good1, frameW, frameH);
+      if(tracking) integrateMotion(motion, now);
+      drawFeaturePairs(good0, good1);
+      mQuality.textContent = good1.length > 40 ? 'STRONG' : good1.length>15 ? 'FAIR' : 'WEAK';
+    } else {
+      mQuality.textContent = 'LOW';
+    }
+
+    // rebuild point mat from good1 for next iteration
+    if(good1.length>0){
+      let arr = new Float32Array(good1.length*2);
+      for(let i=0;i<good1.length;i++){ arr[i*2]=good1[i].x; arr[i*2+1]=good1[i].y; }
+      trackPoints.delete();
+      trackPoints = cv.matFromArray(good1.length,1,cv.CV_32FC2, arr);
+    } else {
+      trackPoints = null;
+    }
+
+    nextPts.delete(); status.delete(); err.delete();
+  }
+
+  prevGray.delete();
+  prevGray = gray;
+  src.delete();
+}
+
+function detectFeatures(grayMat){
+  let corners = new cv.Mat();
+  let none = new cv.Mat();
+  try{
+    cv.goodFeaturesToTrack(grayMat, corners, 150, 0.01, 8, none, 3, false, 0.04);
+  }catch(e){
+    corners.delete(); none.delete();
+    return null;
+  }
+  none.delete();
+  if(corners.rows===0){ corners.delete(); return null; }
+  // convert to CV_32FC2 layout expected by optical flow
+  let pts = new cv.Mat();
+  corners.convertTo(pts, cv.CV_32FC2);
+  corners.delete();
+  return pts;
+}
+
+/* Off-screen canvas mirrors the video frame for pixel readout */
+let capCanvas = document.createElement('canvas');
+let capCtx = null;
+function getCapCanvas(){
+  if(capCanvas.width!==frameW || capCanvas.height!==frameH){
+    capCanvas.width = frameW; capCanvas.height = frameH;
+    capCtx = capCanvas.getContext('2d', {willReadFrequently:true});
+  }
+  capCtx.drawImage(video, 0,0, frameW, frameH);
+  return capCtx.getImageData(0,0,frameW,frameH).data;
+}
+
+/* Estimate a simple camera delta (pan/tilt/dolly/roll proxy) from
+   sparse point correspondences using their centroid flow (translation)
+   and the rotational component of the point cloud (roll) plus scale
+   change (dolly/zoom proxy). This is a lightweight approximation —
+   good enough for stylized camera moves, not survey-grade SFM. */
+function estimateCameraDelta(pts0, pts1, w, h){
+  let sx=0, sy=0;
+  for(let i=0;i<pts0.length;i++){
+    sx += (pts1[i].x - pts0[i].x);
+    sy += (pts1[i].y - pts0[i].y);
+  }
+  sx/=pts0.length; sy/=pts0.length;
+
+  // centroid-relative points for rotation/scale estimate
+  let c0x=0,c0y=0,c1x=0,c1y=0;
+  for(let i=0;i<pts0.length;i++){ c0x+=pts0[i].x; c0y+=pts0[i].y; c1x+=pts1[i].x; c1y+=pts1[i].y; }
+  c0x/=pts0.length; c0y/=pts0.length; c1x/=pts1.length; c1y/=pts1.length;
+
+  let num=0, den=0, scaleAcc=0, n=0;
+  for(let i=0;i<pts0.length;i++){
+    const ax = pts0[i].x-c0x, ay = pts0[i].y-c0y;
+    const bx = pts1[i].x-c1x, by = pts1[i].y-c1y;
+    const r0 = Math.hypot(ax,ay), r1 = Math.hypot(bx,by);
+    if(r0>2 && r1>2){
+      const ang0 = Math.atan2(ay,ax), ang1 = Math.atan2(by,bx);
+      let dAng = ang1-ang0;
+      while(dAng> Math.PI) dAng-=2*Math.PI;
+      while(dAng< -Math.PI) dAng+=2*Math.PI;
+      num += dAng; n++;
+      scaleAcc += (r1/r0);
+    }
+  }
+  const roll = n>0 ? (num/n) : 0;
+  const scale = n>0 ? (scaleAcc/n) : 1.0;
+
+  return {
+    panPx: -sx, tiltPx: -sy,          // screen-space translation of the scene => inverse camera pan/tilt
+    rollRad: -roll,
+    dolly: (scale-1.0)                 // >0 scene grows => camera moved forward
+  };
+}
+
+/* Convert per-frame delta into accumulated camera pos/rot, run through
+   One Euro filters, push a raw sample. */
+const PAN_TO_DEG = 0.05;   // px -> degrees sensitivity (tunable)
+const DOLLY_TO_UNIT = 4.0; // scale delta -> world units sensitivity
+
+function integrateMotion(motion, now){
+  camRot.y += motion.panPx * PAN_TO_DEG * 0.01745329 * 0; // placeholder unused, kept explicit below
+  // yaw from horizontal pan, pitch from vertical tilt, roll from rotation, z from dolly
+  const dYaw   = motion.panPx  * PAN_TO_DEG;
+  const dPitch = motion.tiltPx * PAN_TO_DEG;
+  const dRoll  = motion.rollRad * (180/Math.PI);
+  const dZ     = motion.dolly * DOLLY_TO_UNIT;
+
+  camRot.y += dYaw;
+  camRot.x += dPitch;
+  camRot.z += dRoll;
+  camPos.z += dZ;
+  camPos.x += motion.panPx * 0.002;
+  camPos.y += -motion.tiltPx * 0.002;
+
+  jitterAccum.push(Math.hypot(motion.panPx, motion.tiltPx));
+  if(jitterAccum.length>200) jitterAccum.shift();
+
+  const fpx = filters.px.filter(camPos.x, now);
+  const fpy = filters.py.filter(camPos.y, now);
+  const fpz = filters.pz.filter(camPos.z, now);
+  const frx = filters.rx.filter(camRot.x, now);
+  const fry = filters.ry.filter(camRot.y, now);
+  const frz = filters.rz.filter(camRot.z, now);
+
+  const sample = {
+    t: (now - recStartTime)/1000,
+    position: {x:+fpx.toFixed(5), y:+fpy.toFixed(5), z:+fpz.toFixed(5)},
+    rotation: {x:+frx.toFixed(4), y:+fry.toFixed(4), z:+frz.toFixed(4)}
+  };
+  rawSamples.push(sample);
+  reduceToKeyframe(sample);
+
+  mRaw.textContent = rawSamples.length;
+  mDuration.textContent = sample.t.toFixed(1)+'s';
+  kfCountEl.textContent = keyframes.length;
+  kfStripCount.textContent = keyframes.length + ' keyframes';
+  renderKfStrip();
+}
+
+function reduceToKeyframe(sample){
+  const thresh = parseFloat(threshVal.textContent);
+  if(keyframes.length===0){ keyframes.push(sample); return; }
+  const last = keyframes[keyframes.length-1];
+  const dp = Math.hypot(sample.position.x-last.position.x, sample.position.y-last.position.y, sample.position.z-last.position.z);
+  const dr = Math.hypot(sample.rotation.x-last.rotation.x, sample.rotation.y-last.rotation.y, sample.rotation.z-last.rotation.z);
+  if(dp > thresh*10 || dr > thresh*100){
+    keyframes.push(sample);
+  }
+}
+
+function renderKfStrip(){
+  // lightweight: redraw tick marks proportionally
+  kfStrip.querySelectorAll('.kf').forEach(e=>e.remove());
+  if(keyframes.length<2) return;
+  const total = keyframes[keyframes.length-1].t || 1;
+  const frag = document.createDocumentFragment();
+  keyframes.forEach(k=>{
+    const tick = document.createElement('div');
+    tick.className='kf';
+    tick.style.left = (Math.min(99,(k.t/total)*100))+'%';
+    frag.appendChild(tick);
+  });
+  kfStrip.insertBefore(frag, kfStripCount);
+}
+
+function finalizeMetrics(){
+  const avgJitter = jitterAccum.length ? (jitterAccum.reduce((a,b)=>a+b,0)/jitterAccum.length) : 0;
+  mJitter.textContent = avgJitter.toFixed(2);
+}
+
+/* ---------------- Overlay drawing ---------------- */
+function drawFeatures(pts, unused){
+  if(!pts) return;
+  octx.fillStyle = 'rgba(79,227,163,0.85)';
+  for(let i=0;i<pts.rows;i++){
+    const x = pts.data32F[i*2], y = pts.data32F[i*2+1];
+    octx.beginPath(); octx.arc(x,y,2,0,Math.PI*2); octx.fill();
+  }
+}
+function drawFeaturePairs(pts0, pts1){
+  octx.strokeStyle = 'rgba(79,227,163,0.55)';
+  octx.lineWidth = 1;
+  octx.fillStyle = 'rgba(79,227,163,0.9)';
+  for(let i=0;i<pts1.length;i++){
+    octx.beginPath();
+    octx.moveTo(pts0[i].x, pts0[i].y);
+    octx.lineTo(pts1[i].x, pts1[i].y);
+    octx.stroke();
+    octx.beginPath(); octx.arc(pts1[i].x, pts1[i].y, 2, 0, Math.PI*2); octx.fill();
+  }
+}
+
+/* ---------------- Export ---------------- */
+function buildExportPayload(){
+  return {
+    meta: {
+      app: 'PVCam by PVC Studio',
+      version: '0.1',
+      fps_estimate: fpsSamples.length ? +(fpsSamples.reduce((a,b)=>a+b,0)/fpsSamples.length).toFixed(2) : 30,
+      duration_sec: rawSamples.length ? rawSamples[rawSamples.length-1].t : 0,
+      raw_sample_count: rawSamples.length,
+      keyframe_count: keyframes.length,
+      coordinate_note: 'position in arbitrary world units (scene-relative), rotation in degrees, Euler XYZ, camera-space',
+      units: 'position: unitless (scale on import in Blender/target DCC); rotation: degrees'
+    },
+    keyframes: keyframes.map(k=>({
+      time: +k.t.toFixed(4),
+      position: k.position,
+      rotation: k.rotation
+    }))
+  };
+}
+
+downloadJsonBtn.addEventListener('click', ()=>{
+  const payload = buildExportPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'pvcam_camera_path.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  log('JSON timeline downloaded (' + payload.keyframes.length + ' keyframes).', 'ok');
+});
+
+sendFbxBtn.addEventListener('click', async ()=>{
+  const endpoint = endpointInput.value.trim();
+  if(!endpoint){
+    log('Enter your backend endpoint URL first (the Blender/bpy conversion service).', 'warn');
+    return;
+  }
+  const payload = buildExportPayload();
+  sendFbxBtn.disabled = true;
+  sendFbxBtn.textContent = 'Sending…';
+  log('Sending timeline to ' + endpoint + ' …');
+  try{
+    const res = await fetch(endpoint, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error('Server responded ' + res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'pvcam_camera.fbx';
+    a.click();
+    URL.revokeObjectURL(url);
+    log('FBX received and downloaded.', 'ok');
+  }catch(e){
+    log('Export failed: ' + e.message, 'warn');
+  } finally {
+    sendFbxBtn.disabled = false;
+    sendFbxBtn.textContent = 'Send → Get FBX';
+  }
+});
+
+window.addEventListener('beforeunload', ()=>{
+  if(rafId) cancelAnimationFrame(rafId);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+});
+</script>
+</body>
+</html>
