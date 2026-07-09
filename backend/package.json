@@ -1,0 +1,16 @@
+{
+  "name": "pvcam-backend",
+  "version": "1.0.0",
+  "description": "Self-provisioning Blender-headless backend for PVCam (by PVC Studio) camera-path to FBX conversion.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "license": "MIT"
+}
